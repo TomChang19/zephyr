@@ -96,6 +96,7 @@ static const struct espi_npcx_vw_ex espi_npcx_vw_ex_0[] = {
 
 /* Minimum delay before acknowledging a virtual wire */
 #define NPCX_ESPI_VWIRE_ACK_DELAY    10ul /* 10 us */
+#define NPCX_ESPI_VWIRE_SEND_TIMEOUT 100ul
 
 /* OOB channel maximum payload size */
 #define NPCX_ESPI_OOB_MAX_PAYLOAD    64
@@ -807,7 +808,7 @@ static bool espi_npcx_channel_ready(const struct device *dev,
 static int espi_npcx_send_vwire(const struct device *dev,
 			enum espi_vwire_signal signal, uint8_t level)
 {
-	uint8_t reg_idx, bitmask, sig_idx, val = 0, vw_tbl_size;
+	uint8_t reg_idx, bitmask, sig_idx, val = 0, vw_tbl_size, cnt;
 	struct espi_reg *const inst = HAL_INSTANCE(dev);
 	const struct npcx_vw_out_config *vw_tbl;
 	uint32_t reg_val;
@@ -859,9 +860,35 @@ static int espi_npcx_send_vwire(const struct device *dev,
 	if (signal >= ESPI_VWIRE_SIGNAL_TARGET_GPIO_0) {
 		SET_FIELD(inst->VWGPSM[reg_idx], NPCX_VWEVSM_WIRE, val);
 		reg_val = inst->VWGPSM[reg_idx];
+
+		if (IS_ENABLED(CONFIG_ESPI_NPCX_VWIRE_ENABLE_SEND_CHECK)) {
+			cnt = NPCX_ESPI_VWIRE_SEND_TIMEOUT;
+
+			/* This function will be called in the ISR, so it must not enter sleep. */
+			while (IS_BIT_SET(inst->VWGPSM[reg_idx], NPCX_VWEVSM_DIRTY) && cnt--) {
+				k_busy_wait(100);
+			}
+
+			if (cnt == 0) {
+				LOG_ERR("%s signal %d timeout", __func__, signal);
+			}
+		}
 	} else {
 		SET_FIELD(inst->VWEVSM[reg_idx], NPCX_VWEVSM_WIRE, val);
 		reg_val = inst->VWEVSM[reg_idx];
+
+		if (IS_ENABLED(CONFIG_ESPI_NPCX_VWIRE_ENABLE_SEND_CHECK)) {
+			cnt = NPCX_ESPI_VWIRE_SEND_TIMEOUT;
+
+			/* This function will be called in the ISR, so it must not enter sleep. */
+			while (IS_BIT_SET(inst->VWEVSM[reg_idx], NPCX_VWEVSM_DIRTY) && cnt--) {
+				k_busy_wait(100);
+			}
+
+			if (cnt == 0) {
+				LOG_ERR("%s signal %d timeout", __func__, signal);
+			}
+		}
 	}
 
 	LOG_DBG("Send VW: %s%d 0x%08X", reg_name, reg_idx, reg_val);
